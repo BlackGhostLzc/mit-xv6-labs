@@ -1,6 +1,5 @@
-
 # To compile and run with a lab solution, set the lab name in lab.mk
-# (e.g., LAB=util).  Run make grade to test solution with the lab's
+# (e.g., LB=util).  Run make grade to test solution with the lab's
 # grade script (e.g., grade-lab-util).
 
 -include conf/lab.mk
@@ -10,7 +9,12 @@ U=user
 
 OBJS = \
   $K/entry.o \
+  $K/start.o \
+  $K/console.o \
+  $K/printf.o \
+  $K/uart.o \
   $K/kalloc.o \
+  $K/spinlock.o \
   $K/string.o \
   $K/main.o \
   $K/vm.o \
@@ -32,19 +36,12 @@ OBJS = \
   $K/plic.o \
   $K/virtio_disk.o
 
-OBJS_KCSAN = \
-  $K/start.o \
-  $K/console.o \
-  $K/printf.o \
-  $K/uart.o \
-  $K/spinlock.o
-
-ifdef KCSAN
-OBJS_KCSAN += \
-	$K/kcsan.o
+ifeq ($(LAB),pgtbl)
+OBJS += \
+	$K/vmcopyin.o
 endif
 
-ifeq ($(LAB),$(filter $(LAB), lock))
+ifeq ($(LAB),$(filter $(LAB), pgtbl lock))
 OBJS += \
 	$K/stats.o\
 	$K/sprintf.o
@@ -104,11 +101,6 @@ ifeq ($(LAB),net)
 CFLAGS += -DNET_TESTS_PORT=$(SERVERPORT)
 endif
 
-ifdef KCSAN
-CFLAGS += -DKCSAN
-KCSANFLAG = -fsanitize=thread
-endif
-
 # Disable PIE when possible (for Ubuntu 16.10 toolchain)
 ifneq ($(shell $(CC) -dumpspecs 2>/dev/null | grep -e '[^f]no-pie'),)
 CFLAGS += -fno-pie -no-pie
@@ -119,16 +111,10 @@ endif
 
 LDFLAGS = -z max-page-size=4096
 
-$K/kernel: $(OBJS) $(OBJS_KCSAN) $K/kernel.ld $U/initcode
-	$(LD) $(LDFLAGS) -T $K/kernel.ld -o $K/kernel $(OBJS) $(OBJS_KCSAN)
+$K/kernel: $(OBJS) $K/kernel.ld $U/initcode
+	$(LD) $(LDFLAGS) -T $K/kernel.ld -o $K/kernel $(OBJS) 
 	$(OBJDUMP) -S $K/kernel > $K/kernel.asm
 	$(OBJDUMP) -t $K/kernel | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $K/kernel.sym
-
-$(OBJS): EXTRAFLAG := $(KCSANFLAG)
-
-$K/%.o: $K/%.c
-	$(CC) $(CFLAGS) $(EXTRAFLAG) -c -o $@ $<
-
 
 $U/initcode: $U/initcode.S
 	$(CC) $(CFLAGS) -march=rv64g -nostdinc -I. -Ikernel -c $U/initcode.S -o $U/initcode.o
@@ -141,7 +127,7 @@ tags: $(OBJS) _init
 
 ULIB = $U/ulib.o $U/usys.o $U/printf.o $U/umalloc.o
 
-ifeq ($(LAB),$(filter $(LAB), lock))
+ifeq ($(LAB),$(filter $(LAB), pgtbl lock))
 ULIB += $U/statistics.o
 endif
 
@@ -188,11 +174,12 @@ UPROGS=\
 	$U/_grind\
 	$U/_wc\
 	$U/_zombie\
+	$U/_symlinktest\
 
 
 
 
-ifeq ($(LAB),$(filter $(LAB), lock))
+ifeq ($(LAB),$(filter $(LAB), pgtbl lock))
 UPROGS += \
 	$U/_stats
 endif
@@ -225,15 +212,10 @@ $U/_uthread: $U/uthread.o $U/uthread_switch.o $(ULIB)
 	$(OBJDUMP) -S $U/_uthread > $U/uthread.asm
 
 ph: notxv6/ph.c
-	gcc -o ph -g -O2 $(XCFLAGS) notxv6/ph.c -pthread
+	gcc -o ph -g -O2 notxv6/ph.c -pthread
 
 barrier: notxv6/barrier.c
-	gcc -o barrier -g -O2 $(XCFLAGS) notxv6/barrier.c -pthread
-endif
-
-ifeq ($(LAB),pgtbl)
-UPROGS += \
-	$U/_pgtbltest
+	gcc -o barrier -g -O2 notxv6/barrier.c -pthread
 endif
 
 ifeq ($(LAB),lock)
@@ -271,8 +253,7 @@ clean:
 	$U/initcode $U/initcode.out $K/kernel fs.img \
 	mkfs/mkfs .gdbinit \
         $U/usys.S \
-	$(UPROGS) \
-	ph barrier
+	$(UPROGS)
 
 # try to generate a unique GDB port
 GDBPORT = $(shell expr `id -u` % 5000 + 25000)
@@ -341,7 +322,7 @@ grade:
 ##
 
 
-WEBSUB := https://6828.scripts.mit.edu/2021/handin.py
+WEBSUB := https://6828.scripts.mit.edu/2020/handin.py
 
 handin: tarball-pref myapi.key
 	@SUF=$(LAB); \
@@ -373,7 +354,7 @@ handin-check:
 		test "$$r" = y; \
 	fi
 
-UPSTREAM := $(shell git remote -v | grep -m 1 "xv6-labs-2021" | awk '{split($$0,a," "); print a[1]}')
+UPSTREAM := $(shell git remote -v | grep -m 1 "xv6-labs-2020" | awk '{split($$0,a," "); print a[1]}')
 
 tarball: handin-check
 	git archive --format=tar HEAD | gzip > lab-$(LAB)-handin.tar.gz
